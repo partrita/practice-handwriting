@@ -1,0 +1,21 @@
+[project]
+name = "practice-handwriting"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Taeyoon Kim", email = "partrita@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "click>=8.2.1",
+    "pillow>=11.2.1",
+    "reportlab>=4.4.1",
+]
+
+[project.scripts]
+pdf-generate = "practice_handwriting.template_generator:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

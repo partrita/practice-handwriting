@@ -1,0 +1,73 @@
+# .github/workflows/main.yml
+name: Generate Handwriting Practice PDFs
+
+on:
+  push:
+    branches:
+      - main # main 브랜치에 푸시될 때 트리거됩니다.
+    paths:
+      - 'handwriting_practice_generator.py'
+      - 'requirements.txt'
+      - 'Dockerfile'
+      - 'data/**' # data 디렉토리 내의 모든 변경 사항을 감지합니다.
+
+  workflow_dispatch: # 수동으로 워크플로우를 실행할 수 있도록 합니다.
+
+jobs:
+  build_and_release:
+    runs-on: ubuntu-latest # Ubuntu 환경에서 실행합니다.
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4 # 리포지토리 코드를 체크아웃합니다.
+
+    - name: Build Docker image
+      run: docker build -t handwriting-generator . # Docker 이미지를 빌드합니다.
+
+    - name: Ensure data/output directory exists for mounting
+      # Docker 컨테이너가 마운트할 디렉토리가 호스트에 존재하도록 미리 생성합니다.
+      run: mkdir -p data/output
+
+    - name: Run Docker container and generate PDFs
+      # Docker 컨테이너를 실행하여 PDF들을 생성합니다.
+      # -v "$(pwd)/data/output:/app/data/output" 를 통해 호스트의 data/output과 컨테이너의 /app/data/output을 동기화합니다.
+      # --input_dir과 --font_dir은 컨테이너 내부 경로를 사용합니다.
+      run: |
+        docker run -v "$(pwd)/data/output:/app/data/output" handwriting-generator \
+          --input_dir "/app/data/input" \
+          --font_dir "/app/data/fonts" \
+          --output_dir "/app/data/output" \
+          --grid_spacing_mm 8
+
+    - name: Archive generated PDFs
+      # 생성된 모든 PDF 파일을 하나의 ZIP 파일로 압축합니다.
+      run: |
+        cd data/output
+        zip -r handwriting_practice_pdfs.zip ./*.pdf
+        mv handwriting_practice_pdfs.zip ../../ # 루트 디렉토리로 이동하여 릴리스에 업로드 준비
+
+    - name: Create GitHub Release
+      id: create_release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # GitHub 토큰을 사용하여 릴리스를 생성합니다.
+      with:
+        tag_name: v${{ github.run_number }} # 자동으로 버전 태그를 생성합니다 (예: v1, v2).
+        release_name: Handwriting Practice Sheets v${{ github.run_number }} # 릴리스 이름.
+        body: |
+          자동으로 생성된 손글씨 연습 시트 모음입니다.
+          * 입력 텍스트 파일: data/input/ 폴더 내의 모든 .txt 파일
+          * 폰트: data/fonts/ 폴더 내의 모든 .ttf/.otf 폰트
+          * 모눈 간격: 8mm
+        draft: false # 초안이 아닌 즉시 릴리스합니다.
+        prerelease: false # 사전 릴리스가 아닙니다.
+
+    - name: Upload Release Asset
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }} # 릴리스 생성 시 얻은 업로드 URL.
+        asset_path: ./handwriting_practice_pdfs.zip # 업로드할 ZIP 파일의 경로.
+        asset_name: handwriting_practice_pdfs.zip # 릴리스에 표시될 파일 이름.
+        asset_content_type: application/zip # 파일의 MIME 타입.
