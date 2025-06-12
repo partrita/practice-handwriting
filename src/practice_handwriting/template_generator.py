@@ -1,8 +1,12 @@
 import os
 from PIL import Image, ImageDraw, ImageFont
-from reportlab.lib.pagesizes import letter
+# letter 대신 A4를 사용하도록 수정
+from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 from reportlab.lib.units import mm
+# ReportLab의 자동 줄바꿈을 위한 Flowables 및 스타일 임포트
+from reportlab.platypus import Paragraph, Spacer, SimpleDocTemplate
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 import click
 
 def create_grid_image(width, height, grid_spacing, line_color=(220, 220, 220)):
@@ -27,6 +31,30 @@ def create_grid_image(width, height, grid_spacing, line_color=(220, 220, 220)):
         draw.line([(i, 0), (i, height)], fill=line_color, width=1)
     return image
 
+def _draw_grid_on_page(canvas_obj, doc, grid_spacing_mm, margins_pt):
+    """
+    각 페이지에 모눈을 그리는 헬퍼 함수입니다.
+    """
+    page_width, page_height = doc.pagesize
+    grid_spacing_pt = grid_spacing_mm * mm
+    margin_left, margin_right, margin_top, margin_bottom = margins_pt
+
+    canvas_obj.setStrokeColorRGB(0.86, 0.86, 0.86) # 밝은 회색
+    canvas_obj.setLineWidth(0.5)
+
+    # 세로선 그리기
+    x_start = margin_left
+    while x_start <= page_width - margin_right:
+        canvas_obj.line(x_start, margin_bottom, x_start, page_height - margin_top)
+        x_start += grid_spacing_pt
+
+    # 가로선 그리기
+    y_start = margin_bottom
+    while y_start <= page_height - margin_top:
+        canvas_obj.line(margin_left, y_start, page_width - margin_right, y_start)
+        y_start += grid_spacing_pt
+
+
 def generate_practice_sheet(text_content, font_path, font_name_for_log, font_size, line_height_factor, output_filepath, grid_spacing_mm=5):
     """
     모눈 종이 배경에 텍스트를 사용하여 손글씨 연습 시트를 생성하고 PDF로 저장합니다.
@@ -44,89 +72,73 @@ def generate_practice_sheet(text_content, font_path, font_name_for_log, font_siz
     if output_dir and not os.path.exists(output_dir):
         os.makedirs(output_dir)
 
-    # letter 사이즈를 사용합니다 (8.5 x 11 인치).
-    page_width, page_height = letter
+    # A4 사이즈를 사용하고 ReportLab의 SimpleDocTemplate을 초기화합니다.
+    # ReportLab은 기본적으로 포인트 단위를 사용합니다 (1인치 = 72포인트).
+    # 여백을 mm 단위로 설정 후 포인트로 변환합니다.
+    margin_left_mm = 20
+    margin_right_mm = 20
+    margin_top_mm = 20
+    margin_bottom_mm = 20
 
-    # PDF 캔버스 생성
-    c = canvas.Canvas(output_filepath, pagesize=letter)
+    margins_pt = (margin_left_mm * mm, margin_right_mm * mm, margin_top_mm * mm, margin_bottom_mm * mm)
 
-    # 픽셀 단위로 모눈 간격 계산 (ReportLab은 포인트 단위를 사용하고, 1인치는 72포인트)
-    # 1mm = 1/25.4 인치
-    grid_spacing_pt = grid_spacing_mm * mm
+    doc = SimpleDocTemplate(output_filepath, pagesize=A4,
+                            leftMargin=margins_pt[0],
+                            rightMargin=margins_pt[1],
+                            topMargin=margins_pt[2],
+                            bottomMargin=margins_pt[3])
 
-    # PDF에 직접 모눈 그리기
-    c.setStrokeColorRGB(0.86, 0.86, 0.86) # 회색
-    c.setLineWidth(0.5)
+    Story = [] # PDF 내용(flowables)을 담을 리스트
 
-    # 페이지 여백 설정 (mm 단위)
-    margin_left = 20 * mm
-    margin_right = 20 * mm
-    margin_top = 20 * mm
-    margin_bottom = 20 * mm
-
-    # 세로선 그리기
-    x_start = margin_left
-    while x_start <= page_width - margin_right:
-        c.line(x_start, margin_bottom, x_start, page_height - margin_top)
-        x_start += grid_spacing_pt
-
-    # 가로선 그리기
-    y_start = margin_bottom
-    while y_start <= page_height - margin_top:
-        c.line(margin_left, y_start, page_width - margin_right, y_start)
-        y_start += grid_spacing_pt
-
+    styles = getSampleStyleSheet()
+    
+    # 폰트 등록 및 사용
+    custom_font_name = f'CustomFont_{font_name_for_log}'
     try:
-        # ReportLab 폰트 등록 및 설정
         from reportlab.pdfbase import pdfmetrics
         from reportlab.pdfbase.ttfonts import TTFont
-        # 폰트 이름이 충돌하지 않도록 파일 경로 기반으로 고유하게 생성
-        pdfmetrics.registerFont(TTFont(f'CustomFont_{font_name_for_log}', font_path))
-        c.setFont(f'CustomFont_{font_name_for_log}', font_size)
+        pdfmetrics.registerFont(TTFont(custom_font_name, font_path))
+        font_to_use = custom_font_name
     except Exception as e:
         click.echo(f"Error loading font '{font_name_for_log}' from '{font_path}': {e}. Falling back to Helvetica.", err=True)
-        # 폰트 로드 실패 시 기본 폰트로 폴백
-        c.setFont("Helvetica", font_size)
+        font_to_use = "Helvetica"
 
-    line_height = font_size * line_height_factor # 줄 간격 조절
+    # 텍스트 스타일 정의
+    # ParagraphStyle을 사용하여 폰트, 크기, 줄 간격 및 자동 줄바꿈을 설정합니다.
+    styles.add(ParagraphStyle(name='CustomContentStyle',
+                              fontName=font_to_use,
+                              fontSize=font_size,
+                              # leading은 줄 간격(base-line to base-line)을 설정합니다.
+                              leading=font_size * line_height_factor,
+                              spaceBefore=0, # 단락 전 공간
+                              spaceAfter=0,  # 단락 후 공간
+                              # wrapOn=True는 Paragraph의 기본값이므로 명시적으로 설정할 필요는 없지만,
+                              # 여기서는 텍스트 영역에 맞춰 자동으로 줄바꿈됩니다.
+                             ))
 
-    # 텍스트 쓰기 시작 위치
-    x_pos = margin_left
-    y_pos = page_height - margin_top - line_height
-
+    # 텍스트 내용을 줄바꿈 문자('\n') 기준으로 분리하여 각 줄을 별도의 단락으로 처리
     lines = text_content.split('\n')
     for line_text in lines:
-        if y_pos < margin_bottom + line_height: # 페이지 하단에 도달하면 새 페이지 추가
-            c.showPage()
-            # 새 페이지에도 모눈 다시 그리기
-            c.setStrokeColorRGB(0.86, 0.86, 0.86) # 회색
-            c.setLineWidth(0.5)
-            x_start = margin_left
-            while x_start <= page_width - margin_right:
-                c.line(x_start, margin_bottom, x_start, page_height - margin_top)
-                x_start += grid_spacing_pt
-            y_start = margin_bottom
-            while y_start <= page_height - margin_top:
-                c.line(margin_left, y_start, page_width - margin_right, y_start)
-                y_start += grid_spacing_pt
-            # 새 페이지에 폰트 다시 설정 (폰트 로드 성공 시)
-            try:
-                c.setFont(f'CustomFont_{font_name_for_log}', font_size)
-            except Exception:
-                c.setFont("Helvetica", font_size) # 폰트 로드 실패 시
-            y_pos = page_height - margin_top - line_height # 새 페이지 상단부터 시작
+        # Paragraph 객체를 생성하여 Story에 추가합니다.
+        # Paragraph는 지정된 스타일과 페이지 너비에 맞춰 자동으로 텍스트를 줄바꿈합니다.
+        p = Paragraph(line_text, styles['CustomContentStyle'])
+        Story.append(p)
+        # 각 줄/단락 사이에 추가 공간을 주기 위해 Spacer를 추가할 수 있습니다.
+        # 여기서는 leading에 이미 줄 간격이 포함되어 있으므로, 필요에 따라 조절합니다.
+        # Story.append(Spacer(1, font_size * (line_height_factor - 1)))
 
-        # 텍스트 그리기
-        c.drawString(x_pos, y_pos, line_text)
-        y_pos -= line_height # 다음 줄로 이동
+    # PDF 문서 빌드
+    # onFirstPage와 onLaterPages를 사용하여 각 페이지에 모눈을 그립니다.
+    doc.build(Story,
+              onFirstPage=lambda canvas_obj, doc: _draw_grid_on_page(canvas_obj, doc, grid_spacing_mm, margins_pt),
+              onLaterPages=lambda canvas_obj, doc: _draw_grid_on_page(canvas_obj, doc, grid_spacing_mm, margins_pt))
 
-    c.save()
     click.echo(f"'{output_filepath}' 파일이 성공적으로 생성되었습니다. (텍스트: '{text_content[:20]}...', 폰트: '{font_name_for_log}')")
 
 @click.command()
-@click.option("--input_dir", type=click.Path(exists=True, file_okay=False, dir_okay=True), required=True,
+@click.option("--input_dir", type=click.Path(exists=True, file_okay=False, dir_okay=True), required=True, default="data/input",
               help="연습 시트에 포함될 문구가 있는 텍스트 파일들을 담은 디렉토리의 경로 (예: 'data/input').")
-@click.option("--font_dir", type=click.Path(exists=True, file_okay=False, dir_okay=True), required=True,
+@click.option("--font_dir", type=click.Path(exists=True, file_okay=False, dir_okay=True), required=True, default="data/fonts",
               help="사용할 폰트 파일들을 담은 디렉토리의 경로 (예: 'data/fonts').")
 @click.option("--output_dir", type=click.Path(file_okay=False, dir_okay=True), default="data/output",
               help="생성될 PDF 파일들이 저장될 디렉토리의 경로 (기본값: 'data/output').")
@@ -134,8 +146,8 @@ def generate_practice_sheet(text_content, font_path, font_name_for_log, font_siz
               help="폰트 크기 (기본값: 24).")
 @click.option("--line_height_factor", type=float, default=1.5,
               help="줄 높이 조절 요소 (폰트 크기에 곱해짐, 기본값: 1.5).")
-@click.option("--grid_spacing_mm", type=int, default=10,
-              help="모눈 선 간격 (mm 단위, 기본값: 10).")
+@click.option("--grid_spacing_mm", type=int, default=4,
+              help="모눈 선 간격 (mm 단위, 기본값: 4).")
 def main(input_dir, font_dir, output_dir, font_size, line_height_factor, grid_spacing_mm):
     """
     손글씨 연습 시트 PDF 생성기

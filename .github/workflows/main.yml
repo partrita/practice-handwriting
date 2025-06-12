@@ -22,7 +22,7 @@ jobs:
       uses: actions/checkout@v4 # 리포지토리 코드를 체크아웃합니다.
 
     - name: Build Docker image
-      run: docker build -t handwriting-generator . # Docker 이미지를 빌드합니다.
+      run: docker build -t pdf-generator . # Docker 이미지를 빌드합니다.
 
     - name: Ensure data/output directory exists for mounting
       # Docker 컨테이너가 마운트할 디렉토리가 호스트에 존재하도록 미리 생성합니다.
@@ -33,10 +33,7 @@ jobs:
       # -v "$(pwd)/data/output:/app/data/output" 를 통해 호스트의 data/output과 컨테이너의 /app/data/output을 동기화합니다.
       # --input_dir과 --font_dir은 컨테이너 내부 경로를 사용합니다.
       run: |
-        docker run -v "$(pwd)/data/output:/app/data/output" handwriting-generator \
-          --input_dir "/app/data/input" \
-          --font_dir "/app/data/fonts" \
-          --output_dir "/app/data/output" \
+        docker run -v "$(pwd)/data/output:/app/data/output" pdf-generator \
           --grid_spacing_mm 8
 
     - name: Archive generated PDFs
